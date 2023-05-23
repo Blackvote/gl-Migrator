@@ -6,12 +6,21 @@ A simple tool for managing Protobuf dependencies.
 
 Надо скачать бинарь TODO: Добавить место где они будут храниться
 
+Создать GL и GH токены
+Создать GH репозиторий
+Создать пустую папку
+Закинуть в пустую папку бинарь
+Запустить с обязательными флагами -s, -d, -p
+
 ## Флаги
 ```
--d, --destination string   Dest Url
+Flags:
+-s, --source string        Required. Source Url. Must be gitlab repo
+-p, --pid int              Required. Source project ID
+-d, --destination string   Required. Dest Url. Must be github repo
 -h, --help                 help for gl-migrator
 -r, --remove               Remove local repo before use and after use
--s, --source string        Source Url
+
 ```
 ## Алгоритм работы:
 
@@ -23,3 +32,9 @@ A simple tool for managing Protobuf dependencies.
 6) git gc --prune=now
 7) Меняем origin на destination
 8) Пушим репо из .git в origin. RefSpec "refs/heads/*:refs/heads/*"
+
+
+## Пример запуска
+```bash
+gl-migrator.exe -s https://git.netsrv.it/neo/ggpoker.git -p 252 -d https://github.com/deeplay-io/trainer-ggpoker.git
+```

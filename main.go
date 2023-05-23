@@ -1,12 +1,17 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"github.com/go-git/go-git/v5"
+	github "github.com/google/go-github/v37/github"
 	"github.com/manifoldco/promptui"
 	"github.com/pkg/errors"
+	"github.com/spf13/cast"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
+	"github.com/xanzy/go-gitlab"
+	"golang.org/x/oauth2"
 	"log"
 	"os"
 	"os/exec"
@@ -18,15 +23,17 @@ import (
 const (
 	finalGitDir    = ".git"
 	configFileName = "gl-migrator-cfg"
+	owner          = "deeplay-io"
 )
 
 var (
-	sourceURL, // репозиторий в Gitlab, который нужно перенести в Github
-	destinationURL, // пустой репозиторий в Github
+	sourceURL, // Репозиторий в Gitlab, который нужно перенести в Github
+	destinationURL, // Пустой репозиторий в Github
 	ghToken, // Токены
 	glToken,
 	pushToken,
-	pullToken string // для передачи в Push
+	pullToken string // Для передачи в Push\Pull
+	projectID int // ID проекта в GitLab
 )
 
 var rootCmd = &cobra.Command{
@@ -91,6 +98,7 @@ var rootCmd = &cobra.Command{
 			sourceURL = strings.Replace(sourceURL, "https://", "", 1)
 		}
 
+		println("Cloning Repo")
 		clone := exec.Command("git", "clone", "--bare", "https://oauth2:"+pullToken+"@"+sourceURL)
 		output, err := clone.Output()
 		println(string(output))
@@ -138,7 +146,7 @@ var rootCmd = &cobra.Command{
 			log.Fatal("Remote 'origin' not found")
 		}
 
-		fmt.Printf("Setting up origin-url from %v to %v\n", remote.URLs, "["+destinationURL+"]")
+		fmt.Printf("Setting up origin-url from %v to %v\n", "https://"+sourceURL, destinationURL)
 		// Меняем origin.url
 		remote.URLs = []string{destinationURL}
 		err = r.SetConfig(cfg)
@@ -149,12 +157,82 @@ var rootCmd = &cobra.Command{
 		fmt.Println("Pushing to origin")
 		pushRepo(finalGitDir, pushToken)
 
+		gitlabClient, err := gitlab.NewClient(glToken, gitlab.WithBaseURL("https://git.netsrv.it/api/v4"))
+
+		if err != nil {
+			log.Fatal(err)
+		}
+		githubClient := getGitHubClient(ghToken)
+
+		srcParts := strings.Split(destinationURL, "/")
+		srcRepoGroup := srcParts[len(srcParts)-2]
+		srcRepo := srcParts[len(srcParts)-1]
+		srcRepo = strings.Replace(srcRepo, ".git", "", 1)
+
+		dstParts := strings.Split(destinationURL, "/")
+		dstRepo := dstParts[len(dstParts)-1]
+		dstRepo = strings.Replace(dstRepo, ".git", "", 1)
+
+		mergeRequests, _, err := gitlabClient.MergeRequests.ListProjectMergeRequests(projectID, nil)
+		if err != nil {
+			log.Fatal(err)
+		}
+
+		// Создание PR
+		for _, mergeRequest := range mergeRequests {
+			if mergeRequest.State != "opened" {
+				continue
+			} else {
+				fmt.Printf("Creating PR #%d\n", mergeRequest.IID)
+				_, resp, err := gitlabClient.Branches.GetBranch(projectID, mergeRequest.SourceBranch)
+				if resp.StatusCode == 404 {
+					fmt.Printf("Cant create PR#%d. Source branch is not exist", mergeRequest.IID)
+					continue
+				}
+				_, resp, err = gitlabClient.Branches.GetBranch(projectID, mergeRequest.TargetBranch)
+				if resp.StatusCode == 404 {
+					fmt.Printf("Cant create PR#%d. Target branch is not exist", mergeRequest.IID)
+					continue
+
+				}
+				pullRequest, _, err := createPullRequest(githubClient, dstRepo, mergeRequest)
+				if err != nil {
+					log.Println(err)
+				} else {
+					labels, err := getMergeRequestLabels(gitlabClient, cast.ToInt(projectID), mergeRequest.IID)
+					if err != nil {
+						log.Println(err)
+					}
+
+					addLabelsToPullRequest(githubClient, dstRepo, pullRequest, labels)
+
+					assignee := ""
+					if mergeRequest.Assignee != nil {
+						assignee = mergeRequest.Assignee.Username
+					}
+
+					MergeRequestURL := fmt.Sprintf("https://git.netsrv.it/%s/%s/-/merge_requests/%d", srcRepoGroup, srcRepo, mergeRequest.IID)
+					comment := fmt.Sprintf("Migrated from GitLab.\nAt GitLab was been assigned to: **@%s**\n%s", assignee, MergeRequestURL)
+					_, _, err = githubClient.Issues.CreateComment(context.Background(), owner, dstRepo, pullRequest.GetNumber(), &github.IssueComment{
+						Body: github.String(comment),
+					})
+					if err != nil {
+						log.Printf("Error adding comment to pull request %d: %v\n", pullRequest.GetNumber(), err)
+					} else {
+						fmt.Printf("Comment added to pull request %d\n", pullRequest.GetNumber())
+					}
+				}
+				continue
+			}
+		}
+
 	},
 }
 
 func init() {
-	rootCmd.PersistentFlags().StringVarP(&sourceURL, "source", "s", "", "Source Url")
-	rootCmd.PersistentFlags().StringVarP(&destinationURL, "destination", "d", "", "Dest Url")
+	rootCmd.PersistentFlags().StringVarP(&sourceURL, "source", "s", "", "Required. Source Url. Must be gitlab repo")
+	rootCmd.PersistentFlags().StringVarP(&destinationURL, "destination", "d", "", "Required. Dest Url. Must be github repo")
+	rootCmd.PersistentFlags().IntVarP(&projectID, "pid", "p", 0, "Required. Source project ID")
 	rootCmd.Flags().BoolP("remove", "r", false, "Remove local repo before use and after use")
 	err := rootCmd.MarkPersistentFlagRequired("source")
 	if err != nil {
@@ -168,17 +246,22 @@ func init() {
 
 func main() {
 	if err := rootCmd.Execute(); err != nil {
-		fmt.Fprintln(os.Stderr, err)
+		_, err := fmt.Fprintln(os.Stderr, err)
+		if err != nil {
+			fmt.Println("Some things fatal(main.cmd):", err)
+			return
+		}
+		if err != nil {
+
+		}
 		os.Exit(1)
 	}
-	//if rootCmd.Flag("remove").Value.String() == "true" {
-	//	removeRepo()
-	//}
+
 }
 
 func getPAT() string {
 	prompt := promptui.Prompt{
-		Label: "Enter your github PAT",
+		Label: "Enter your github Personal Access Token",
 		Validate: func(input string) error {
 			if input == "" {
 				return errors.New("PAT is required")
@@ -210,4 +293,101 @@ func getGLToken() string {
 		panic(err)
 	}
 	return glToken
+}
+
+func getGitHubClient(token string) *github.Client {
+	ctx := context.Background()
+	ts := oauth2.StaticTokenSource(
+		&oauth2.Token{AccessToken: token},
+	)
+	tc := oauth2.NewClient(ctx, ts)
+
+	return github.NewClient(tc)
+}
+
+func createPullRequest(client *github.Client, repo string, mergeRequest *gitlab.MergeRequest) (*github.PullRequest, *github.Response, error) {
+
+	title := mergeRequest.Title
+	body := mergeRequest.Description
+	head := mergeRequest.SourceBranch
+	base := mergeRequest.TargetBranch
+
+	newPullRequest := &github.NewPullRequest{
+		Title: &title,
+		Body:  &body,
+		Head:  &head,
+		Base:  &base,
+	}
+
+	pullRequest, response, err := client.PullRequests.Create(context.Background(), owner, repo, newPullRequest)
+	if err != nil {
+		return nil, response, err
+	}
+	return pullRequest, response, nil
+}
+
+func getMergeRequestLabels(client *gitlab.Client, projectID, mergeRequestID int) ([]*gitlab.Label, error) {
+	mr, _, err := client.MergeRequests.GetMergeRequest(projectID, mergeRequestID, nil)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get merge request: %v", err)
+	}
+
+	labels := []*gitlab.Label{}
+	for _, label := range mr.Labels {
+		labels = append(labels, &gitlab.Label{
+			Name:        label,
+			Description: "",
+			Color:       "",
+		})
+	}
+
+	return labels, nil
+}
+
+func addLabelsToPullRequest(client *github.Client, repo string, pullRequest *github.PullRequest, labels []*gitlab.Label) {
+
+	// Get the existing labels in the GitHub repository
+	existingLabels, _, err := client.Issues.ListLabels(context.Background(), owner, repo, nil)
+	if err != nil {
+		log.Printf("Error retrieving existing labels: %v\n", err)
+		return
+	}
+
+	// Create a map of existing labels
+	existingLabelsMap := make(map[string]bool)
+	for _, l := range existingLabels {
+		existingLabelsMap[*l.Name] = true
+	}
+
+	// Add labels to the pull request if they don't exist
+	for _, label := range labels {
+		// Check if the label exists in GitHub
+		_, ok := existingLabelsMap[label.Name]
+		if !ok {
+			// Create the label in GitHub
+			newLabel := &github.Label{
+				Name:        &label.Name,
+				Description: nil, // Set a nil description
+				Color:       nil, // Set a nil color
+			}
+			fmt.Printf("Crate label %s", &label.Name)
+			_, _, err := client.Issues.CreateLabel(context.Background(), owner, repo, newLabel)
+			if err != nil {
+				log.Printf("Error creating label %s: %v\n", label.Name, err)
+				continue
+			}
+
+			fmt.Printf("Label %s created and added to pull request %d\n", label.Name, pullRequest.GetNumber())
+		}
+
+		// Add the label to the pull request
+		fmt.Printf("Adding label to PR %s", label.Name)
+		_, _, err := client.Issues.AddLabelsToIssue(context.Background(), owner, repo, pullRequest.GetNumber(), []string{label.Name})
+		if err != nil {
+			log.Printf("Error adding label %s to pull request %d: %v\n", label.Name, pullRequest.GetNumber(), err)
+			continue
+		}
+
+		fmt.Printf("Label %s added to pull request %d\n", label.Name, pullRequest.GetNumber())
+	}
 }
