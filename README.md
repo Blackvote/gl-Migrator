@@ -1,6 +1,6 @@
 # GL Migrator
 
-A simple tool for managing Protobuf dependencies.
+A consol utility for migrating Gitlab Repo To Github (Including PR, labels)
 
 ## Installation
 
