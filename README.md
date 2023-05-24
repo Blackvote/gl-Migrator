@@ -1,6 +1,6 @@
 # GL Migrator
 
-A consol utility for migrating Gitlab Repo To Github (Including PR, labels)
+Utility for migrating Gitlab Repo To Github (Including PR, labels)
 
 ## Installation
 
@@ -20,18 +20,17 @@ Flags:
 -d, --destination string   Required. Dest Url. Must be github repo
 -h, --help                 help for gl-migrator
 -r, --remove               Remove local repo before use and after use
-
 ```
 ## Алгоритм работы:
 
-1) Проверяем GL и GH Токены. Если их нет - запрашиваем и сохраняем в usr.HomeDir + gl-migrator-cfg.yaml)
+1) Проверяем GL и GH Токены. Если их нет - запрашиваем и сохраняем в (usr.HomeDir + gl-migrator-cfg.yaml)
 2) Отчищаем папку (".")
 3) Клонируем репу из source
 4) Переименовываем клонированную папку в .git
 5) git reflog expire --expire-unreachable=now --all
 6) git gc --prune=now
 7) Меняем origin на destination
-8) Пушим репо из .git в origin. RefSpec "refs/heads/*:refs/heads/*"
+8) Пушим в origin. RefSpec "refs/heads/*:refs/heads/*"
 9) Получаем список MR из GitLab
 10) Получаем список PR из GitHub
 11) Мигрируем MR'ы
@@ -45,8 +44,8 @@ Flags:
 
 ## NB
 
-Если PRов много, то можно упереться в Rate Limit от GitLab, ошибка:
-(403 You have exceeded a secondary rate limit and have been temporarily blocked from content creation. Please retry your request again later. [])
+Если PRов много, то можно упереться в Rate Limit от GitLab, ( Как правило допустимо пушить 8 PR за раз ) ошибка:
+403 You have exceeded a secondary rate limit and have been temporarily blocked from content creation. Please retry your request again later. []
 Что делать? Ждать.
 
 Лимит на получение открытых MR - 50 записей (main.go#L181)
