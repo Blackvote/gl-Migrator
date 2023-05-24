@@ -52,5 +52,6 @@ Flags:
 
 ## Пример запуска
 ```bash
-gl-migrator.exe -s https://git.netsrv.it/neo/ggpoker.git -p 252 -d https://github.com/deeplay-io/trainer-ggpoker.git
+gl-migrator.exe -s https://git.netsrv.it/neo/pppoker.git -p 49 -d https://github.com/deeplay-io/gl-migrator-ppp.git
 ```
+Итог: https://github.com/deeplay-io/gl-migrator-ppp
