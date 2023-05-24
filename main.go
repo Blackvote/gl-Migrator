@@ -164,7 +164,7 @@ var rootCmd = &cobra.Command{
 		}
 		githubClient := getGitHubClient(ghToken)
 
-		srcParts := strings.Split(destinationURL, "/")
+		srcParts := strings.Split(sourceURL, "/")
 		srcRepoGroup := srcParts[len(srcParts)-2]
 		srcRepo := srcParts[len(srcParts)-1]
 		srcRepo = strings.Replace(srcRepo, ".git", "", 1)
@@ -173,9 +173,26 @@ var rootCmd = &cobra.Command{
 		dstRepo := dstParts[len(dstParts)-1]
 		dstRepo = strings.Replace(dstRepo, ".git", "", 1)
 
-		mergeRequests, _, err := gitlabClient.MergeRequests.ListProjectMergeRequests(projectID, nil)
+		state := "opened"
+		getMrOption := &gitlab.ListProjectMergeRequestsOptions{
+			State: &state,
+			ListOptions: gitlab.ListOptions{
+				Page:    1,
+				PerPage: 50,
+			},
+		}
+		mergeRequests, _, err := gitlabClient.MergeRequests.ListProjectMergeRequests(projectID, getMrOption)
 		if err != nil {
 			log.Fatal(err)
+		}
+
+		existingPullRequests, _, err := githubClient.PullRequests.List(context.Background(), owner, dstRepo, &github.PullRequestListOptions{
+			State: "open",
+		})
+
+		processedPullRequests := make(map[string]bool)
+		for _, pr := range existingPullRequests {
+			processedPullRequests[pr.GetTitle()] = true
 		}
 
 		// Создание PR
@@ -183,49 +200,60 @@ var rootCmd = &cobra.Command{
 			if mergeRequest.State != "opened" {
 				continue
 			} else {
-				fmt.Printf("Creating PR #%d\n", mergeRequest.IID)
-				_, resp, err := gitlabClient.Branches.GetBranch(projectID, mergeRequest.SourceBranch)
-				if resp.StatusCode == 404 {
-					fmt.Printf("Cant create PR#%d. Source branch is not exist", mergeRequest.IID)
+				if processedPullRequests[mergeRequest.Title] {
+					fmt.Printf("Merge request \"%s\" already exist. Skip it.\n", mergeRequest.Title)
 					continue
-				}
-				_, resp, err = gitlabClient.Branches.GetBranch(projectID, mergeRequest.TargetBranch)
-				if resp.StatusCode == 404 {
-					fmt.Printf("Cant create PR#%d. Target branch is not exist", mergeRequest.IID)
-					continue
-
-				}
-				pullRequest, _, err := createPullRequest(githubClient, dstRepo, mergeRequest)
-				if err != nil {
-					log.Println(err)
 				} else {
-					labels, err := getMergeRequestLabels(gitlabClient, cast.ToInt(projectID), mergeRequest.IID)
+					fmt.Printf("Merge request \"%s\" Not Exist. Cheking branch...\n", mergeRequest.Title)
+					_, resp, err := gitlabClient.Branches.GetBranch(projectID, mergeRequest.SourceBranch)
+					if resp.StatusCode == 404 {
+						fmt.Printf("Cant create PR. Source branch is not exist")
+						continue
+					} else if err != nil {
+						fmt.Printf("Cant get Source branch is not exist? (%s)", mergeRequest.SourceBranch)
+						continue
+					}
+					_, resp, err = gitlabClient.Branches.GetBranch(projectID, mergeRequest.TargetBranch)
+					if resp.StatusCode == 404 {
+						fmt.Printf("Cant create PR#%d. Target branch is not exist", mergeRequest.IID)
+						continue
+					} else if err != nil {
+						fmt.Printf("Cant get Target branch is not exist? (%s)", mergeRequest.TargetBranch)
+						continue
+					}
+					fmt.Printf("Branch exists. Creating PR...\n")
+					pullRequest, _, err := createPullRequest(githubClient, dstRepo, mergeRequest)
 					if err != nil {
 						log.Println(err)
-					}
-
-					addLabelsToPullRequest(githubClient, dstRepo, pullRequest, labels)
-
-					assignee := ""
-					if mergeRequest.Assignee != nil {
-						assignee = mergeRequest.Assignee.Username
-					}
-
-					MergeRequestURL := fmt.Sprintf("https://git.netsrv.it/%s/%s/-/merge_requests/%d", srcRepoGroup, srcRepo, mergeRequest.IID)
-					comment := fmt.Sprintf("Migrated from GitLab.\nAt GitLab was been assigned to: **@%s**\n%s", assignee, MergeRequestURL)
-					_, _, err = githubClient.Issues.CreateComment(context.Background(), owner, dstRepo, pullRequest.GetNumber(), &github.IssueComment{
-						Body: github.String(comment),
-					})
-					if err != nil {
-						log.Printf("Error adding comment to pull request %d: %v\n", pullRequest.GetNumber(), err)
 					} else {
-						fmt.Printf("Comment added to pull request %d\n", pullRequest.GetNumber())
-					}
-				}
-				continue
-			}
-		}
+						labels, err := getMergeRequestLabels(gitlabClient, cast.ToInt(projectID), mergeRequest.IID)
+						if err != nil {
+							log.Println(err)
+						}
 
+						addLabelsToPullRequest(githubClient, dstRepo, pullRequest, labels)
+
+						assignee := ""
+						if mergeRequest.Assignee != nil {
+							assignee = mergeRequest.Assignee.Username
+						}
+
+						MergeRequestURL := fmt.Sprintf("https://git.netsrv.it/%s/%s/-/merge_requests/%d", srcRepoGroup, srcRepo, mergeRequest.IID)
+						comment := fmt.Sprintf("Migrated from GitLab.\nAt GitLab was been assigned to: **@%s**\n%s", assignee, MergeRequestURL)
+						_, _, err = githubClient.Issues.CreateComment(context.Background(), owner, dstRepo, pullRequest.GetNumber(), &github.IssueComment{
+							Body: github.String(comment),
+						})
+						if err != nil {
+							log.Printf("Error adding comment to pull request %d: %v\n", pullRequest.GetNumber(), err)
+						} else {
+							fmt.Printf("Comment added to pull request %d\n", pullRequest.GetNumber())
+						}
+					}
+					continue
+				}
+			}
+
+		}
 	},
 }
 
