@@ -155,13 +155,8 @@ var rootCmd = &cobra.Command{
 		}
 
 		fmt.Println("Pushing to origin")
+
 		pushRepo(finalGitDir, pushToken)
-
-		gitlabClient, err := gitlab.NewClient(glToken, gitlab.WithBaseURL("https://git.netsrv.it/api/v4"))
-
-		if err != nil {
-			log.Fatal(err)
-		}
 		githubClient := getGitHubClient(ghToken)
 
 		srcParts := strings.Split(sourceURL, "/")
@@ -172,6 +167,54 @@ var rootCmd = &cobra.Command{
 		dstParts := strings.Split(destinationURL, "/")
 		dstRepo := dstParts[len(dstParts)-1]
 		dstRepo = strings.Replace(dstRepo, ".git", "", 1)
+
+		newDefaultBranch := ""
+		fmt.Println("Try to find master branch")
+		_, resp, err := githubClient.Repositories.GetBranch(context.Background(), owner, dstRepo, "master", false)
+		if resp.StatusCode == 404 {
+			fmt.Printf("Cannot create PR. Source branch does not exist\n")
+		} else if err != nil {
+			fmt.Println("Cannot get Source branch. Does it exist? master")
+		} else {
+			newDefaultBranch = "master"
+		}
+
+		if newDefaultBranch == "" {
+			fmt.Println("Try to find main branch")
+			_, resp, err := githubClient.Repositories.GetBranch(context.Background(), owner, dstRepo, "main", false)
+			if resp.StatusCode == 404 {
+				fmt.Printf("Cannot create PR. Source branch does not exist\n")
+			} else if err != nil {
+				fmt.Println("Cannot get Source branch. Does it exist? master")
+			} else {
+				newDefaultBranch = "main"
+			}
+		}
+
+		if newDefaultBranch == "" {
+			fmt.Println("Try to find develop branch")
+			_, resp, err := githubClient.Repositories.GetBranch(context.Background(), owner, dstRepo, "main", false)
+			if resp.StatusCode == 404 {
+				fmt.Printf("Cannot create PR. Source branch does not exist\n")
+			} else if err != nil {
+				fmt.Println("Cannot get Source branch. Does it exist? master")
+			} else {
+				newDefaultBranch = "develop"
+			}
+		}
+
+		_, _, err = githubClient.Repositories.Edit(context.Background(), owner, dstRepo, &github.Repository{
+			DefaultBranch: &newDefaultBranch,
+		})
+		if err != nil {
+			log.Fatal(err)
+		}
+
+		gitlabClient, err := gitlab.NewClient(glToken, gitlab.WithBaseURL("https://git.netsrv.it/api/v4"))
+
+		if err != nil {
+			log.Fatal(err)
+		}
 
 		state := "opened"
 		getMrOption := &gitlab.ListProjectMergeRequestsOptions{
@@ -205,21 +248,22 @@ var rootCmd = &cobra.Command{
 					continue
 				} else {
 					fmt.Printf("Merge request \"%s\" Not Exist. Cheking branch...\n", mergeRequest.Title)
-					_, resp, err := gitlabClient.Branches.GetBranch(projectID, mergeRequest.SourceBranch)
+					_, resp, err := githubClient.Repositories.GetBranch(context.Background(), owner, dstRepo, mergeRequest.SourceBranch, false)
 					if resp.StatusCode == 404 {
-						fmt.Printf("Cant create PR. Source branch is not exist")
-						continue
+						fmt.Printf("Cannot create PR. Source branch does not exist\n")
+						return
 					} else if err != nil {
-						fmt.Printf("Cant get Source branch is not exist? (%s)", mergeRequest.SourceBranch)
-						continue
+						fmt.Printf("Cannot get Source branch. Does it exist? (%s)\n", mergeRequest.SourceBranch)
+						return
 					}
-					_, resp, err = gitlabClient.Branches.GetBranch(projectID, mergeRequest.TargetBranch)
+
+					_, resp, err = githubClient.Repositories.GetBranch(context.Background(), owner, dstRepo, mergeRequest.TargetBranch, false)
 					if resp.StatusCode == 404 {
-						fmt.Printf("Cant create PR#%d. Target branch is not exist", mergeRequest.IID)
-						continue
+						fmt.Printf("Cannot create PR. Target branch does not exist\n")
+						return
 					} else if err != nil {
-						fmt.Printf("Cant get Target branch is not exist? (%s)", mergeRequest.TargetBranch)
-						continue
+						fmt.Printf("Cannot get Target branch. Does it exist? (%s)\n", mergeRequest.TargetBranch)
+						return
 					}
 					fmt.Printf("Branch exists. Creating PR...\n")
 					pullRequest, _, err := createPullRequest(githubClient, dstRepo, mergeRequest)
@@ -262,6 +306,7 @@ func init() {
 	rootCmd.PersistentFlags().StringVarP(&destinationURL, "destination", "d", "", "Required. Dest Url. Must be github repo")
 	rootCmd.PersistentFlags().IntVarP(&projectID, "pid", "p", 0, "Required. Source project ID")
 	rootCmd.Flags().BoolP("remove", "r", false, "Remove local repo before use and after use")
+	rootCmd.Flags().BoolP("defbranch", "b", false, "Change default branch to master/main/develop")
 	err := rootCmd.MarkPersistentFlagRequired("source")
 	if err != nil {
 		fmt.Println("Ошибка при установке обязательного флага:", err)

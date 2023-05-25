@@ -20,6 +20,7 @@ Flags:
 -d, --destination string   Required. Dest Url. Must be github repo
 -h, --help                 help for gl-migrator
 -r, --remove               Remove local repo before use and after use
+-b, --defbranch            Change default branch to master/main/develop
 ```
 ## Алгоритм работы приложения:
 
@@ -31,9 +32,11 @@ Flags:
 6) git gc --prune=now
 7) Меняет origin на destination
 8) Пушит в origin. RefSpec 'refs/heads/*:refs/heads/*' ( все ветки )
-9) Получает список MR из GitLab
-10) Получает список PR из GitHub
-11) Мигрирует MR'ы,
+9) Если активен -b, ищет ветку master, устанавливает её как Default branch, если master ветки нет, то main, если нет, то develop
+10) Получает список MR из GitLab
+11) Получает список PR из GitHub
+12) Мигрирует MR'ы,
+13) Если активен -r, отчищает папку
 
 Цикл обработки Merge Request'a, с целью создания из него PR, приложение:
 1) Проверяет что MR имеет state=opened ( Не закрыт )
