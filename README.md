@@ -63,7 +63,8 @@ gl-migrator.exe -s https://git.netsrv.it/neo/pppoker.git -p 49 -d https://github
 Итог: https://github.com/deeplay-io/gl-migrator-ppp
 
 # TODO:
+```
 Сборка исполняемых файлов
 Добавить Миграцию Issues
-Изменение Default Branch на master
+```
 
