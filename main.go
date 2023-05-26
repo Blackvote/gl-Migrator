@@ -195,7 +195,7 @@ var rootCmd = &cobra.Command{
 
 			if newDefaultBranch == "" {
 				fmt.Println("Try to find develop branch")
-				_, resp, err := githubClient.Repositories.GetBranch(context.Background(), owner, dstRepo, "main", false)
+				_, resp, err := githubClient.Repositories.GetBranch(context.Background(), owner, dstRepo, "develop", false)
 				if resp.StatusCode == 404 {
 					fmt.Printf("Cannot create PR. Source branch does not exist\n")
 				} else if err != nil {
