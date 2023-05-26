@@ -4,14 +4,13 @@ import (
 	"context"
 	"fmt"
 	"github.com/go-git/go-git/v5"
-	github "github.com/google/go-github/v37/github"
+	"github.com/google/go-github/v37/github"
 	"github.com/manifoldco/promptui"
 	"github.com/pkg/errors"
 	"github.com/spf13/cast"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 	"github.com/xanzy/go-gitlab"
-	"golang.org/x/oauth2"
 	"log"
 	"os"
 	"os/exec"
@@ -27,9 +26,9 @@ const (
 )
 
 var (
-	sourceURL, // Репозиторий в Gitlab, который нужно перенести в Github
+	sourceURL,      // Репозиторий в Gitlab, который нужно перенести в Github
 	destinationURL, // Пустой репозиторий в Github
-	ghToken, // Токены
+	ghToken,        // Токены
 	glToken,
 	pushToken,
 	pullToken string // Для передачи в Push\Pull
@@ -156,7 +155,9 @@ var rootCmd = &cobra.Command{
 		fmt.Println("Pushing to origin")
 
 		pushRepo(finalGitDir, pushToken)
+
 		githubClient := getGitHubClient(ghToken)
+		gitlabClient, err := gitlab.NewClient(glToken, gitlab.WithBaseURL("https://git.netsrv.it/api/v4"))
 
 		srcParts := strings.Split(sourceURL, "/")
 		srcRepoGroup := srcParts[len(srcParts)-2]
@@ -214,8 +215,6 @@ var rootCmd = &cobra.Command{
 			}
 		}
 
-		gitlabClient, err := gitlab.NewClient(glToken, gitlab.WithBaseURL("https://git.netsrv.it/api/v4"))
-
 		if err != nil {
 			log.Fatal(err)
 		}
@@ -242,7 +241,7 @@ var rootCmd = &cobra.Command{
 			processedPullRequests[pr.GetTitle()] = true
 		}
 
-		// Создание PR
+		//Создание PR
 		for _, mergeRequest := range mergeRequests {
 			if mergeRequest.State != "opened" {
 				continue
@@ -300,8 +299,19 @@ var rootCmd = &cobra.Command{
 					continue
 				}
 			}
-
 		}
+		fmt.Println("Get Gitlab Tags")
+		gitlabTags, err := getGitLabTags(projectID, gitlabClient)
+		if err != nil {
+			log.Fatalf("Failed to get tags from GitLab: %v", err)
+		}
+
+		fmt.Println("Create Github Tags")
+		err = createGitHubTags(context.Background(), *githubClient, owner, dstRepo, gitlabTags)
+		if err != nil {
+			log.Fatalf("Failed to create tags in GitHub: %v", err)
+		}
+
 		if cmd.Flag("remove").Value.String() == "true" {
 			println("Removing dir content")
 			removeRepo()
@@ -374,101 +384,4 @@ func getGLToken() string {
 		panic(err)
 	}
 	return glToken
-}
-
-func getGitHubClient(token string) *github.Client {
-	ctx := context.Background()
-	ts := oauth2.StaticTokenSource(
-		&oauth2.Token{AccessToken: token},
-	)
-	tc := oauth2.NewClient(ctx, ts)
-
-	return github.NewClient(tc)
-}
-
-func createPullRequest(client *github.Client, repo string, mergeRequest *gitlab.MergeRequest) (*github.PullRequest, *github.Response, error) {
-
-	title := mergeRequest.Title
-	body := mergeRequest.Description
-	head := mergeRequest.SourceBranch
-	base := mergeRequest.TargetBranch
-
-	newPullRequest := &github.NewPullRequest{
-		Title: &title,
-		Body:  &body,
-		Head:  &head,
-		Base:  &base,
-	}
-
-	pullRequest, response, err := client.PullRequests.Create(context.Background(), owner, repo, newPullRequest)
-	if err != nil {
-		return nil, response, err
-	}
-	return pullRequest, response, nil
-}
-
-func getMergeRequestLabels(client *gitlab.Client, projectID, mergeRequestID int) ([]*gitlab.Label, error) {
-	mr, _, err := client.MergeRequests.GetMergeRequest(projectID, mergeRequestID, nil)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get merge request: %v", err)
-	}
-
-	labels := []*gitlab.Label{}
-	for _, label := range mr.Labels {
-		labels = append(labels, &gitlab.Label{
-			Name:        label,
-			Description: "",
-			Color:       "",
-		})
-	}
-
-	return labels, nil
-}
-
-func addLabelsToPullRequest(client *github.Client, repo string, pullRequest *github.PullRequest, labels []*gitlab.Label) {
-
-	// Get the existing labels in the GitHub repository
-	existingLabels, _, err := client.Issues.ListLabels(context.Background(), owner, repo, nil)
-	if err != nil {
-		log.Printf("Error retrieving existing labels: %v\n", err)
-		return
-	}
-
-	// Create a map of existing labels
-	existingLabelsMap := make(map[string]bool)
-	for _, l := range existingLabels {
-		existingLabelsMap[*l.Name] = true
-	}
-
-	// Add labels to the pull request if they don't exist
-	for _, label := range labels {
-		// Check if the label exists in GitHub
-		_, ok := existingLabelsMap[label.Name]
-		if !ok {
-			// Create the label in GitHub
-			newLabel := &github.Label{
-				Name:        &label.Name,
-				Description: nil, // Set a nil description
-				Color:       nil, // Set a nil color
-			}
-			fmt.Printf("Crate label %s", &label.Name)
-			_, _, err := client.Issues.CreateLabel(context.Background(), owner, repo, newLabel)
-			if err != nil {
-				log.Printf("Error creating label %s: %v\n", label.Name, err)
-				continue
-			}
-
-			fmt.Printf("Label %s created and added to pull request %d\n", label.Name, pullRequest.GetNumber())
-		}
-
-		// Add the label to the pull request
-		fmt.Printf("Adding label to PR %s", label.Name)
-		_, _, err := client.Issues.AddLabelsToIssue(context.Background(), owner, repo, pullRequest.GetNumber(), []string{label.Name})
-		if err != nil {
-			log.Printf("Error adding label %s to pull request %d: %v\n", label.Name, pullRequest.GetNumber(), err)
-			continue
-		}
-
-		fmt.Printf("Label %s added to pull request %d\n", label.Name, pullRequest.GetNumber())
-	}
 }
