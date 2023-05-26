@@ -90,7 +90,6 @@ var rootCmd = &cobra.Command{
 		parts := strings.Split(sourceURL, "/")
 		gitDir := parts[len(parts)-1]
 
-		// Клонируем репу
 		println("Removing dir content")
 		removeRepo()
 
@@ -168,46 +167,51 @@ var rootCmd = &cobra.Command{
 		dstRepo := dstParts[len(dstParts)-1]
 		dstRepo = strings.Replace(dstRepo, ".git", "", 1)
 
-		newDefaultBranch := ""
-		fmt.Println("Try to find master branch")
-		_, resp, err := githubClient.Repositories.GetBranch(context.Background(), owner, dstRepo, "master", false)
-		if resp.StatusCode == 404 {
-			fmt.Printf("Cannot create PR. Source branch does not exist\n")
-		} else if err != nil {
-			fmt.Println("Cannot get Source branch. Does it exist? master")
-		} else {
-			newDefaultBranch = "master"
-		}
-
-		if newDefaultBranch == "" {
-			fmt.Println("Try to find main branch")
-			_, resp, err := githubClient.Repositories.GetBranch(context.Background(), owner, dstRepo, "main", false)
+		if cmd.Flag("defbranch").Value.String() == "true" {
+			newDefaultBranch := ""
+			fmt.Println("Try to find master branch")
+			_, resp, err := githubClient.Repositories.GetBranch(context.Background(), owner, dstRepo, "master", false)
 			if resp.StatusCode == 404 {
 				fmt.Printf("Cannot create PR. Source branch does not exist\n")
 			} else if err != nil {
 				fmt.Println("Cannot get Source branch. Does it exist? master")
 			} else {
-				newDefaultBranch = "main"
+				fmt.Println("Master branch was found.")
+				newDefaultBranch = "master"
 			}
-		}
 
-		if newDefaultBranch == "" {
-			fmt.Println("Try to find develop branch")
-			_, resp, err := githubClient.Repositories.GetBranch(context.Background(), owner, dstRepo, "main", false)
-			if resp.StatusCode == 404 {
-				fmt.Printf("Cannot create PR. Source branch does not exist\n")
-			} else if err != nil {
-				fmt.Println("Cannot get Source branch. Does it exist? master")
-			} else {
-				newDefaultBranch = "develop"
+			if newDefaultBranch == "" {
+				fmt.Println("Try to find main branch")
+				_, resp, err := githubClient.Repositories.GetBranch(context.Background(), owner, dstRepo, "main", false)
+				if resp.StatusCode == 404 {
+					fmt.Printf("Cannot create PR. Source branch does not exist\n")
+				} else if err != nil {
+					fmt.Println("Cannot get Source branch. Does it exist? master")
+				} else {
+					fmt.Println("Main branch was found.")
+					newDefaultBranch = "main"
+				}
 			}
-		}
 
-		_, _, err = githubClient.Repositories.Edit(context.Background(), owner, dstRepo, &github.Repository{
-			DefaultBranch: &newDefaultBranch,
-		})
-		if err != nil {
-			log.Fatal(err)
+			if newDefaultBranch == "" {
+				fmt.Println("Try to find develop branch")
+				_, resp, err := githubClient.Repositories.GetBranch(context.Background(), owner, dstRepo, "main", false)
+				if resp.StatusCode == 404 {
+					fmt.Printf("Cannot create PR. Source branch does not exist\n")
+				} else if err != nil {
+					fmt.Println("Cannot get Source branch. Does it exist? master")
+				} else {
+					fmt.Println("develop branch was found.")
+					newDefaultBranch = "develop"
+				}
+			}
+			fmt.Printf("Setting default bransh to %s\n", newDefaultBranch)
+			_, _, err = githubClient.Repositories.Edit(context.Background(), owner, dstRepo, &github.Repository{
+				DefaultBranch: &newDefaultBranch,
+			})
+			if err != nil {
+				log.Fatal(err)
+			}
 		}
 
 		gitlabClient, err := gitlab.NewClient(glToken, gitlab.WithBaseURL("https://git.netsrv.it/api/v4"))
@@ -297,6 +301,10 @@ var rootCmd = &cobra.Command{
 				}
 			}
 
+		}
+		if cmd.Flag("remove").Value.String() == "true" {
+			println("Removing dir content")
+			removeRepo()
 		}
 	},
 }
