@@ -86,7 +86,7 @@ func removeRepo() {
 	}
 }
 
-func createPullRequest(client *github.Client, repo string, mergeRequest *gitlab.MergeRequest) (*github.PullRequest, *github.Response, error) {
+func createPullRequest(client *github.Client, owner, repo string, mergeRequest *gitlab.MergeRequest) (*github.PullRequest, *github.Response, error) {
 
 	title := mergeRequest.Title
 	body := mergeRequest.Description
@@ -125,7 +125,7 @@ func getMergeRequestLabels(client *gitlab.Client, projectID, mergeRequestID int)
 	return labels, nil
 }
 
-func addLabelsToPullRequest(client *github.Client, repo string, pullRequest *github.PullRequest, labels []*gitlab.Label) {
+func addLabelsToPullRequest(client *github.Client, owner, repo string, pullRequest *github.PullRequest, labels []*gitlab.Label) {
 
 	// Get the existing labels in the GitHub repository
 	existingLabels, _, err := client.Issues.ListLabels(context.Background(), owner, repo, nil)

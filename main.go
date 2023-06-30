@@ -22,13 +22,12 @@ import (
 const (
 	finalGitDir    = ".git"
 	configFileName = "gl-migrator-cfg"
-	owner          = "deeplay-io"
 )
 
 var (
-	sourceURL,      // Репозиторий в Gitlab, который нужно перенести в Github
+	sourceURL, // Репозиторий в Gitlab, который нужно перенести в Github
 	destinationURL, // Пустой репозиторий в Github
-	ghToken,        // Токены
+	ghToken, // Токены
 	glToken,
 	pushToken,
 	pullToken string // Для передачи в Push\Pull
@@ -165,6 +164,7 @@ var rootCmd = &cobra.Command{
 		srcRepo = strings.Replace(srcRepo, ".git", "", 1)
 
 		dstParts := strings.Split(destinationURL, "/")
+		owner := dstParts[len(dstParts)-2]
 		dstRepo := dstParts[len(dstParts)-1]
 		dstRepo = strings.Replace(dstRepo, ".git", "", 1)
 
@@ -269,7 +269,7 @@ var rootCmd = &cobra.Command{
 						return
 					}
 					fmt.Printf("Branch exists. Creating PR...\n")
-					pullRequest, _, err := createPullRequest(githubClient, dstRepo, mergeRequest)
+					pullRequest, _, err := createPullRequest(githubClient, owner, dstRepo, mergeRequest)
 					if err != nil {
 						log.Println(err)
 					} else {
@@ -278,7 +278,7 @@ var rootCmd = &cobra.Command{
 							log.Println(err)
 						}
 
-						addLabelsToPullRequest(githubClient, dstRepo, pullRequest, labels)
+						addLabelsToPullRequest(githubClient, owner, dstRepo, pullRequest, labels)
 
 						assignee := ""
 						if mergeRequest.Assignee != nil {
