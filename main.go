@@ -1,7 +1,6 @@
 package main
 
 import (
-	"context"
 	"fmt"
 	"github.com/go-git/go-git/v5"
 	"github.com/google/go-github/v37/github"
@@ -11,6 +10,7 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 	"github.com/xanzy/go-gitlab"
+	"golang.org/x/net/context"
 	"log"
 	"os"
 	"os/exec"
@@ -25,9 +25,9 @@ const (
 )
 
 var (
-	sourceURL, // Репозиторий в Gitlab, который нужно перенести в Github
+	sourceURL,      // Репозиторий в Gitlab, который нужно перенести в Github
 	destinationURL, // Пустой репозиторий в Github
-	ghToken, // Токены
+	ghToken,        // Токены
 	glToken,
 	pushToken,
 	pullToken string // Для передачи в Push\Pull
@@ -74,15 +74,8 @@ var rootCmd = &cobra.Command{
 			glToken = viper.GetString("credentials.gitlab.pat")
 		}
 
-		// Выбор токена для Push
-		containsGithub := strings.Contains(destinationURL, "github")
-		if containsGithub {
-			pushToken = ghToken
-			pullToken = glToken
-		} else {
-			pushToken = glToken
-			pushToken = ghToken
-		}
+		pushToken = ghToken
+		pullToken = glToken
 
 		// Получаем имя итоговой директории
 		parts := strings.Split(sourceURL, "/")
@@ -155,10 +148,8 @@ var rootCmd = &cobra.Command{
 
 		pushRepo(finalGitDir, pushToken)
 
-		githubClient := getGitHubClient(ghToken)
-		gitlabClient, err := gitlab.NewClient(glToken, gitlab.WithBaseURL("https://git.netsrv.it/api/v4"))
-
 		srcParts := strings.Split(sourceURL, "/")
+		gitlabUrl := "https://" + srcParts[len(srcParts)-3]
 		srcRepoGroup := srcParts[len(srcParts)-2]
 		srcRepo := srcParts[len(srcParts)-1]
 		srcRepo = strings.Replace(srcRepo, ".git", "", 1)
@@ -167,6 +158,9 @@ var rootCmd = &cobra.Command{
 		owner := dstParts[len(dstParts)-2]
 		dstRepo := dstParts[len(dstParts)-1]
 		dstRepo = strings.Replace(dstRepo, ".git", "", 1)
+
+		githubClient := getGitHubClient(ghToken)
+		gitlabClient, err := gitlab.NewClient(glToken, gitlab.WithBaseURL(gitlabUrl))
 
 		if cmd.Flag("defbranch").Value.String() == "true" {
 			newDefaultBranch := ""
@@ -206,7 +200,7 @@ var rootCmd = &cobra.Command{
 					newDefaultBranch = "develop"
 				}
 			}
-			fmt.Printf("Setting default bransh to %s\n", newDefaultBranch)
+			fmt.Printf("Setting default branсh to %s\n", newDefaultBranch)
 			_, _, err = githubClient.Repositories.Edit(context.Background(), owner, dstRepo, &github.Repository{
 				DefaultBranch: &newDefaultBranch,
 			})
@@ -285,7 +279,7 @@ var rootCmd = &cobra.Command{
 							assignee = mergeRequest.Assignee.Username
 						}
 
-						MergeRequestURL := fmt.Sprintf("https://git.netsrv.it/%s/%s/-/merge_requests/%d", srcRepoGroup, srcRepo, mergeRequest.IID)
+						MergeRequestURL := fmt.Sprintf(gitlabUrl+"/%s/%s/-/merge_requests/%d", srcRepoGroup, srcRepo, mergeRequest.IID)
 						comment := fmt.Sprintf("Migrated from GitLab.\nAt GitLab was been assigned to: **@%s**\n%s", assignee, MergeRequestURL)
 						_, _, err = githubClient.Issues.CreateComment(context.Background(), owner, dstRepo, pullRequest.GetNumber(), &github.IssueComment{
 							Body: github.String(comment),
@@ -300,6 +294,52 @@ var rootCmd = &cobra.Command{
 				}
 			}
 		}
+		// Получение Issues из Gitlab
+		gitlabIssues, _, err := gitlabClient.Issues.ListProjectIssues(projectID, &gitlab.ListProjectIssuesOptions{})
+		if err != nil {
+			print(err)
+		}
+
+		// Взято из chat.openai.com
+		// Разворачиваем срез с Issue'ами GitLab для сохранения порядка
+		// (предполагая, что порядок основан на времени создания, поэтому обрабатываем их от старых к новым)
+		reverseGitLabIssues(gitlabIssues)
+
+		// Получение Issues из GitHub
+		githubIssues, _, err := githubClient.Issues.ListByRepo(context.Background(), owner, dstRepo, &github.IssueListByRepoOptions{})
+		if err != nil {
+			print(err)
+		}
+
+		// Мапа с Tittle'ами Issus'ов из Github для сравнения
+		githubIssueTitles := make(map[string]bool)
+		for _, issue := range githubIssues {
+			githubIssueTitles[strings.ToLower(*issue.Title)] = true
+		}
+
+		// Получаем содержимое Issues для отправки GitHub
+		for _, issue := range gitlabIssues {
+			title := issue.Title
+			body := issue.Description
+
+			if githubIssueTitles[strings.ToLower(title)] {
+				fmt.Printf("GitHub issue with title '%s' already exists, skipping...\n", title)
+				continue
+			}
+
+			// Создание GitHub issue
+			newIssue := &github.IssueRequest{
+				Title: &title,
+				Body:  &body,
+			}
+			_, _, err = githubClient.Issues.Create(context.Background(), owner, dstRepo, newIssue)
+			if err != nil {
+				fmt.Printf("Failed to create GitHub issue for GitLab issue #%d: %v\n", issue.IID, err)
+				continue
+			}
+			fmt.Printf("Successfully migrated GitLab issue #%d to GitHub\n", issue.IID)
+		}
+
 		fmt.Println("Get Gitlab Tags")
 		gitlabTags, err := getGitLabTags(projectID, gitlabClient)
 		if err != nil {
@@ -384,4 +424,10 @@ func getGLToken() string {
 		panic(err)
 	}
 	return glToken
+}
+
+func reverseGitLabIssues(issues []*gitlab.Issue) {
+	for i, j := 0, len(issues)-1; i < j; i, j = i+1, j-1 {
+		issues[i], issues[j] = issues[j], issues[i]
+	}
 }

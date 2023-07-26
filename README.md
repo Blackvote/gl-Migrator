@@ -7,10 +7,6 @@ Utility for migrating Gitlab Repo To Github (Including PR, labels)
 warn: Существует прямая зависимость от Git на устройстве.
 Некоторые команды запускаются путём передачи в консоль команды типа "git clone --bare URL".
 Убедитесь что Git установлен и находится в PATH.
-Сделано это так из-за того что библиотеки git в go очень бедные в плане функционала.
-
-
-Надо скачать бинарь TODO: Добавить место где они будут храниться
 
 Создать GL и GH токены
 Создать GH репозиторий
@@ -43,8 +39,9 @@ Flags:
 11) Получает список PR из GitHub
 12) Получает список Tags из GitLab
 13) Мигрирует MR'ы,
-14) Мигрирует Tags
-15) Если активен -r, отчищает папку
+14) Мигрирует Issue's
+15) Мигрирует Tags
+16) Если активен -r, отчищает папку
 
 Цикл обработки Merge Request'a, с целью создания из него PR, приложение:
 1) Проверяет что MR имеет state=opened ( Не закрыт )
@@ -55,6 +52,13 @@ Flags:
 6) Проверяет их наличие в создаваемом PR, если их нет, проверяет существуют ли они, если нет, создаёт
 7) Добавляет лейблы на PR
 8) Добавляет комментарий в PR (main.go#L242)
+
+Цикл обработки Issue's
+1) Запрашивает все Issues по ProjectID из GitLab
+2) Запрашивает все Issues по RepoName из GitHub
+3) Сравнивает каждую Issue из Gitlab с Issue из Github, по Tittle, если есть совпадение, пропускает
+4) Создаёт переменную NewIssue
+5) Отправляет NewIssue в GitHub API
 
 Цикл обработки Tags
 1) Достаёт из GitLab Tag Имя, сообщение, commit_sha, Автора, дату создания, почту.
@@ -71,13 +75,10 @@ Flags:
 
 ## Пример запуска
 ```bash
-gl-migrator.exe -s https://git.netsrv.it/neo/pppoker.git -p 49 -d https://github.com/deeplay-io/gl-migrator-ppp.git
+gl-migrator.exe -s <Gitlab_repo_Url> -p <PrjID> -d <GitHub_repo_Url>
 ```
-Итог: https://github.com/deeplay-io/gl-migrator-ppp
 
 # TODO:
 ```
 Сборка исполняемых файлов
-Добавить Миграцию Issues
 ```
-
