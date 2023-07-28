@@ -25,9 +25,9 @@ const (
 )
 
 var (
-	sourceURL,      // Репозиторий в Gitlab, который нужно перенести в Github
+	sourceURL, // Репозиторий в Gitlab, который нужно перенести в Github
 	destinationURL, // Пустой репозиторий в Github
-	ghToken,        // Токены
+	ghToken, // Токены
 	glToken,
 	pushToken,
 	pullToken string // Для передачи в Push\Pull
@@ -149,7 +149,7 @@ var rootCmd = &cobra.Command{
 		pushRepo(finalGitDir, pushToken)
 
 		srcParts := strings.Split(sourceURL, "/")
-		gitlabUrl := "https://" + srcParts[len(srcParts)-3]
+		gitlabURL := "https://" + srcParts[len(srcParts)-3]
 		srcRepoGroup := srcParts[len(srcParts)-2]
 		srcRepo := srcParts[len(srcParts)-1]
 		srcRepo = strings.Replace(srcRepo, ".git", "", 1)
@@ -160,7 +160,7 @@ var rootCmd = &cobra.Command{
 		dstRepo = strings.Replace(dstRepo, ".git", "", 1)
 
 		githubClient := getGitHubClient(ghToken)
-		gitlabClient, err := gitlab.NewClient(glToken, gitlab.WithBaseURL(gitlabUrl))
+		gitlabClient, err := gitlab.NewClient(glToken, gitlab.WithBaseURL(gitlabURL))
 
 		if cmd.Flag("defbranch").Value.String() == "true" {
 			newDefaultBranch := ""
@@ -279,7 +279,7 @@ var rootCmd = &cobra.Command{
 							assignee = mergeRequest.Assignee.Username
 						}
 
-						MergeRequestURL := fmt.Sprintf(gitlabUrl+"/%s/%s/-/merge_requests/%d", srcRepoGroup, srcRepo, mergeRequest.IID)
+						MergeRequestURL := fmt.Sprintf(gitlabURL+"/%s/%s/-/merge_requests/%d", srcRepoGroup, srcRepo, mergeRequest.IID)
 						comment := fmt.Sprintf("Migrated from GitLab.\nAt GitLab was been assigned to: **@%s**\n%s", assignee, MergeRequestURL)
 						_, _, err = githubClient.Issues.CreateComment(context.Background(), owner, dstRepo, pullRequest.GetNumber(), &github.IssueComment{
 							Body: github.String(comment),
