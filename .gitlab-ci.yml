@@ -1,0 +1,56 @@
+stages:
+  - linting
+  - build
+  - release
+
+go-lint:
+  stage: linting
+  image: registry.gitlab.com/pipeline-components/go-lint:latest
+  script:
+    - golint ./...
+  tags:
+    - advisor2
+
+go-build:
+  stage: build
+  rules:
+    - if: '$CI_COMMIT_BRANCH == "master" || $CI_COMMIT_BRANCH == "lint_pipeline" || $CI_COMMIT_TAG'
+  image: golang:1.21-rc-alpine3.17
+  script:
+    - go get ./...
+    - GOARCH=amd64 GOOS=linux go build -ldflags "-extldflags '-static'" -o $CI_PROJECT_DIR/gl_migrator_linux
+    - GOARCH=amd64 GOOS=windows  go build -ldflags "-extldflags '-static'" -o $CI_PROJECT_DIR/gl_migrator_win.exe
+    - echo BUILD_JOB_ID=$CI_JOB_ID >> go-build.env
+  tags:
+    - advisor2
+  artifacts:
+    expire_in: 1 week
+    name: "gl_migrator_linux"
+    paths:
+      - gl_migrator_linux
+      - gl_migrator_win.exe
+    reports:
+      dotenv: go-build.env
+
+release:
+  stage: release
+  image: registry.gitlab.com/gitlab-org/release-cli:latest
+  needs:
+    - job: go-build
+      artifacts: true
+  rules:
+    - if: $CI_COMMIT_TAG
+  script:
+    - echo "running release_job"
+  release:
+    name: gl-migrator_$CI_COMMIT_TAG
+    tag_name: '$CI_COMMIT_TAG'
+    description: '$CI_COMMIT_TAG'
+    assets:
+      links:
+        - name: 'Windows-$CI_COMMIT_TAG'
+          url: 'https://git.netsrv.it/neo/gl-migrator/-/jobs/${BUILD_JOB_ID}/artifacts/raw/gl_migrator_win.exe'
+        - name: 'Linux-$CI_COMMIT_TAG'
+          url: 'https://git.netsrv.it/neo/gl-migrator/-/jobs/${BUILD_JOB_ID}/artifacts/raw/gl_migrator_linux'
+  tags:
+    - advisor2

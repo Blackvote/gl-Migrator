@@ -173,9 +173,9 @@ func addLabelsToPullRequest(client *github.Client, owner, repo string, pullReque
 	}
 }
 
-func getGitLabTags(projectId int, gitlabClient *gitlab.Client) ([]*gitlab.Tag, error) {
+func getGitLabTags(projectID int, gitlabClient *gitlab.Client) ([]*gitlab.Tag, error) {
 
-	tags, _, err := gitlabClient.Tags.ListTags(projectId, nil)
+	tags, _, err := gitlabClient.Tags.ListTags(projectID, nil)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get tags from GitLab: %v", err)
 	}
